@@ -1,6 +1,6 @@
 package ClearCase::Wrapper::DSB;
 
-$VERSION = '1.01';
+$VERSION = '1.02';
 
 use AutoLoader 'AUTOLOAD';
 
@@ -25,12 +25,13 @@ use strict;
    local $0 = $ARGV[0] || '';
    $comment	= "$0 [-new] [-element] object-selector ...";
    $diffcs	= "$0 view-tag-1 [view-tag-2]";
-   $edattr	= "$0 [-element] object-selector ...";
+   $eclipse	= "$0 element ...";
+   $edattr	= "$0 [-view [-tag view-tag]] | [-element] object-selector ...";
    $grep	= "$0 [grep-flags] pattern element";
-   $recheckout	= "$0 pname ...\n";
+   $recheckout	= "$0 pname ...";
    $winkout	= "$0 [-dir|-rec|-all] [-f file] [-pro/mote] [-do]
 		[-meta file [-print] file ...";
-   $workon	= "$0 [-me] [-login] [-exec command-invocation] view-tag\n";
+   $workon	= "$0 [-me] [-login] [-exec command-invocation] view-tag";
 }
 
 #############################################################################
@@ -74,7 +75,7 @@ sub _Burrow {
 
 =head1 NAME
 
-ClearCase::Wrapper::DSB - David Boyce's contributed wrapper functions
+ClearCase::Wrapper::DSB - David Boyce's contributed cleartool wrapper functions
 
 =head1 SYNOPSIS
 
@@ -113,6 +114,10 @@ The value of any attribute may be retrieved by running
 
     <cmd-context> catcs -attr keyword ...
 
+And to print all attributes:
+
+    <cmd-context> catcs -attr -all
+
 =item 4. New B<-start> flag
 
 Prints the preferred I<initial working directory> of a view by
@@ -128,10 +133,6 @@ instead of B<setview> with the config spec:
     element * /main/LATEST
 
 would set the view and automatically cd to C</vobs_fw/src/java>.
-
-=item 5. New B<-rdl> flag
-
-Prints the value of the config spec's C"<##:RDL:> attribute.
 
 =back
 
@@ -151,7 +152,11 @@ sub catcs {
     } elsif ($opt{start}) {
 	$op = 's%##:Start:\s+(\S+)|^\s*element\s+(\S*)/\.{3}\s%print "$+\n";exit 0%ie';
     } elsif ($opt{attribute}) {
-	$op = 's%##:'.$opt{attribute}.':\s+(\S+)|^\s*element\s+(\S*)/\.{3}\s%print "$+\n";exit 0%ie';
+	if ($opt{attribute} eq '-all') {
+	    $op = 's%##:(\S+):\s+(\S+)%print "$1=$2\n"%ie';
+	} else {
+	    $op = 's%##:'.$opt{attribute}.':\s+(\S+)%print "$1\n";exit 0%ie';
+	}
     } elsif ($opt{vobs}) {
 	$op = 's%^element\s+(\S+)/\.{3}\s%print "$1\n"%e';
     }
@@ -173,7 +178,7 @@ useful if you mistyped a comment and want to correct it.
 
 The B<-new> flag causes it to ignore the previous comment.
 
-See B<edattr> for editor selection rules.
+See B<edattr> for the editor selection algorithm.
 
 =cut
 
@@ -181,6 +186,7 @@ sub comment {
     shift @ARGV;
     my %opt;
     GetOptions(\%opt, qw(element new));
+    Assert(@ARGV > 0);	# die with usage msg if untrue
     my $retstat = 0;
     my $editor = $ENV{WINEDITOR} || $ENV{VISUAL} || $ENV{EDITOR} ||
 						    (MSWIN ? 'notepad' : 'vi');
@@ -244,6 +250,72 @@ sub diffcs {
     exit 0;
 }
 
+=item * ECLIPSE
+
+New command. B<Eclipse>s an element by copying a view-private version
+over it. This is the dynamic-view equivalent of "hijacking" a file in a
+snapshot view. Typically of use if you need temporary write access to a
+file when the VOB or current branch is locked, or it's checked out
+reserved.  B<Eclipsing elements can lead to dangerous confusion - use
+with care!>
+
+=cut
+
+sub eclipse {
+    require File::Copy;
+
+    Assert(@ARGV > 1);	# die with usage msg if untrue
+    shift @ARGV;
+
+    my $ct = ClearCase::Argv->new({-autofail=>1});
+    my @orig = $ct->catcs->qx;
+
+    my $retstat = 0;
+    for my $elem (@ARGV) {
+	if (! -f $elem || -w _) {
+	    warn Msg('W', "don't know how to eclipse '$elem'");
+	    $retstat++;
+	    next;
+	}
+
+	my $cstmp = ".$::prog.eclipse.$$";
+	open(CSTMP, ">$cstmp") || die Msg('E', "$cstmp: $!");
+	print CSTMP "element $elem -none\n";
+	print CSTMP @orig;
+	close(CSTMP) || die Msg('E', "$cstmp: $!");
+
+	my $eltmp = "$elem.eclipse.$$";
+	if (! File::Copy::copy($elem, $eltmp)) {
+	    warn Msg('W', "$elem: $!");
+	    $retstat++;
+	    next;
+	}
+
+	if ($ct->setcs($cstmp)->system) {
+	    unlink $eltmp;
+	    $retstat++;
+	    next;
+	}
+
+	if (! File::Copy::copy($eltmp, $elem)) {
+	    warn Msg('W', "$elem: $!");
+	    $retstat++;
+	}
+	unlink $eltmp;
+
+	open(CSTMP, ">$cstmp") || die Msg('E', "$cstmp: $!");
+	print CSTMP @orig;
+	close(CSTMP) || die Msg('E', "$cstmp: $!");
+
+	if ($ct->setcs($cstmp)->system) {
+	    die Msg('W', "your config spec is broken! - original is in $cstmp");
+	}
+
+	unlink $cstmp;
+    }
+    exit $retstat;
+}
+
 =item * EDATTR
 
 New command, inspired by the I<edcs> cmd.  B<Edattr> dumps the
@@ -255,6 +327,10 @@ because as of CC 3.2 the Unix GUI doesn't support modification of
 attributes and the quoting rules make it difficult to use the
 command line.
 
+However, if the B<-view> flag is used I<view attributes> are edited
+instead. See the enhanced I<catcs> command for further discussion of
+view attributes.
+
 The environment variables WINEDITOR, VISUAL, and EDITOR are checked
 in that order for editor names. If none of the above are set, the
 default editor used is vi on UNIX and notepad on Windows.
@@ -263,13 +339,56 @@ default editor used is vi on UNIX and notepad on Windows.
 
 sub edattr {
     my %opt;
-    GetOptions(\%opt, qw(element));
+    GetOptions(\%opt, qw(element view));
     shift @ARGV;
     my $retstat = 0;
     my $editor = $ENV{WINEDITOR} || $ENV{VISUAL} || $ENV{EDITOR} ||
 						    (MSWIN ? 'notepad' : 'vi');
     my $ct = ClearCase::Argv->new;
     my $ctq = $ct->clone({-stdout=>0, -stderr=>0});
+
+    my $edtmp = ".$::prog.edattr.ed.$$";
+    my $cstmp = ".$::prog.edattr.cs.$$";
+
+    if ($opt{view}) {
+	my $tag = ViewTag(@ARGV);
+	GetOptions(\%opt, qw(tag=s));
+	Assert(@ARGV == 0);	# die with usage msg if untrue
+	my @cs = $ct->catcs(['-tag', $tag])->qx;
+	my @rest = grep !m%^##:\w+:%, @cs;
+	my @attrs = map {m%^##:(\w+):\s*(\S*)%; "$1=$2\n"}
+		    grep m%^##:(\w+):%, @cs;
+	open(EDTMP, ">$edtmp") || die Msg('E', "$edtmp: $!");
+	print EDTMP @attrs;
+	close(EDTMP) || die Msg('E', "$edtmp: $!");
+	Argv->new($editor, $edtmp)->system;
+	open(EDTMP, $edtmp) || die Msg('E', "$edtmp: $!");
+	my %nattrs;
+	for (<EDTMP>) {
+	    chomp;
+	    next if /(^\s*#|^\s*$)/;
+	    my($attr, $val) = split(/=/, $_, 2);
+	    $attr = ucfirst(lc($attr));
+	    for ($attr, $val) {
+		s%^\s+%%;
+		s%\s+$%%;
+	    }
+	    $nattrs{$attr} = $val;
+	}
+	close(EDTMP) || die Msg('E', "$edtmp: $!");
+	unlink $edtmp;
+	open(CSTMP, ">$cstmp") || die Msg('E', "$cstmp: $!");
+	for (sort keys %nattrs) {
+	    printf CSTMP "%-10s %s\n", "##:$_:", $nattrs{$_};
+	}
+	print CSTMP @rest;
+	close(CSTMP) || die Msg('E', "$cstmp: $!");
+	$retstat = $ct->setcs(['-tag', $tag], $cstmp)->system;
+	unlink $cstmp if !$retstat;
+	exit $retstat;
+    }
+
+    Assert(@ARGV > 0);	# die with usage msg if untrue
     for my $obj (@ARGV) {
 	my %indata = ();
 	$obj .= '@@' if $opt{element};
@@ -282,9 +401,8 @@ sub edattr {
 	    next unless $line =~ /\s*(\S+)\s+=\s+(.+)/;
 	    $indata{$1} = $2;
 	}
-	my $edtmp = ".$::prog.edattr.$$";
 	open(EDTMP, ">$edtmp") || die Msg('E', "$edtmp: $!");
-	print EDTMP "# $obj (format: attr = \"val\"):\n\n" if ! keys %indata;
+	print EDTMP "# $obj (format: attr = \"val\"):\n\n" if !keys %indata;
 	for (sort keys %indata) { print EDTMP "$_ = $indata{$_}\n" }
 	close(EDTMP) || die Msg('E', "$edtmp: $!");
 
@@ -360,7 +478,8 @@ sub edattr {
 New command. Greps through past revisions of a file for a pattern, so
 you can see which revision introduced a particular function or a
 particular bug. By analogy with I<lsvtree>, I<grep> searches only
-"interesting" versions unless B<-all> is specified.
+"interesting" versions unless B<-all> is specified. I<Note that
+this will expand cleartext for all grepped versions>.
 
 Flags B<-nnn> are accepted where I<nnn> represents the number of versions
 to go back. Thus C<grep -1 foo> would search only the predecessor.
@@ -733,7 +852,9 @@ sub setview {
 =item * WINKIN
 
 The B<-tag> flag allows you specify a local file path plus another view;
-the named DO in the named view will be winked into the current view.
+the named DO in the named view will be winked into the current view, e.g.:
+
+    <cmd-context> winkin -tag otherview /vobs_myvob/dir1/dir2/file
 
 The B<-vp> flag, when used with B<-tag>, causes the "remote" file to be
 converted into a DO if required before winkin is attempted. See the
@@ -784,27 +905,30 @@ as a DO and caused to reference all the other new DO's, thus defining a
 I<DO set> and allowing the entire set to be winked in using the meta-DO
 as a hook. E.g. assuming view-private files X, Y, and Z already exist:
 
-	ct winkout -meta .WINKIN X Y Z
+	ct winkout -meta .WINKSET X Y Z
 
-will make them into derived objects and create a 4th DO ".WINKIN"
+will make them into derived objects and create a 4th DO ".WINKSET"
 containing references to the others. A subsequent
 
-	ct winkin -recurse -adirs /view/extended/path/to/.WINKIN
+	ct winkin -recurse -adirs /view/extended/path/to/.WINKSET
 
 from a different view will wink all four files into the current view.
 
-Accepts B<-dir/-rec/-all/-avobs>, a file containing a list of files
-with B<-flist>, or a literal list of view-private files. When using
-B<-dir/-rec/-all/-avobs> to derive the file list only the output of
-C<lsprivate -other> is considered unless B<-do> is used; B<-do> causes
-existing DO's to be re-converted.
+The list of files to convert may be derived via
+B<-dir/-rec/-all/-avobs>, provided in a file containing a list of files
+with B<-flist>, or specified as a literal list of view-private files.
+When using B<-dir/-rec/-all/-avobs> to derive the file list only the
+output of C<lsprivate -other> is considered unless B<-do> is used;
+B<-do> causes existing DO's to be re-converted. Use B<-do> with
+care as it may convert a useful CR to a meaningless one.
 
-The B<"-flist -"> flag can be used to read the file list from stdin.
+The B<"-flist -"> flag can be used to read the file list from stdin,
+which may be useful in a script.
 
 =cut
 
 sub winkout {
-    warn Msg('E', "if you can get this working on &%@# Windows you're a better programmer than I am!") if MSWIN;
+    warn Msg('E', "it may be possible to get this working on &%@# Windows but I haven't tried") if MSWIN;
     my %opt;
     GetOptions(\%opt, qw(directory recurse all avobs flist=s
 					do meta=s print promote));
@@ -925,7 +1049,7 @@ sub workon {
 	    last;
 	}
     }
-    die Msg('E', "no tag argument found in '@ARGV'") if !$tag;
+    Assert($tag);
     # If anything left in @ARGV has whitespace, quote it against its
     # journey through the "setview -exec" shell.
     for (@ARGV) {
