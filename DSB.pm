@@ -1,6 +1,6 @@
 package ClearCase::Wrapper::DSB;
 
-$VERSION = '1.03';
+$VERSION = '1.04';
 
 use AutoLoader 'AUTOLOAD';
 
@@ -266,9 +266,12 @@ sub eclipse {
     require File::Copy;
 
     Assert(@ARGV > 1);	# die with usage msg if untrue
-    shift @ARGV;
+    shift @ARGV;	# dump the command name, leaving only files to eclipse
 
+    # Create a cleartool object that will exit on failure of any CC op.
     my $ct = ClearCase::Argv->new({-autofail=>1});
+
+    # Retrieve the original config spec.
     my @orig = $ct->catcs->qx;
 
     my $retstat = 0;
@@ -279,12 +282,14 @@ sub eclipse {
 	    next;
 	}
 
+	# Make a config spec template that hides the to-be-eclipsed elem.
 	my $cstmp = ".$::prog.eclipse.$$";
 	open(CSTMP, ">$cstmp") || die Msg('E', "$cstmp: $!");
 	print CSTMP "element $elem -none\n";
 	print CSTMP @orig;
 	close(CSTMP) || die Msg('E', "$cstmp: $!");
 
+	# Copy the element aside before it gets hidden.
 	my $eltmp = "$elem.eclipse.$$";
 	if (! File::Copy::copy($elem, $eltmp)) {
 	    warn Msg('W', "$elem: $!");
@@ -292,26 +297,28 @@ sub eclipse {
 	    next;
 	}
 
+	# Now set the modified config spec to hide the element.
 	if ($ct->setcs($cstmp)->system) {
 	    unlink $eltmp;
 	    $retstat++;
 	    next;
 	}
 
+	# Copy the copy back to its original place. It will become
+	# writeable as a side effect.
 	if (! File::Copy::copy($eltmp, $elem)) {
 	    warn Msg('W', "$elem: $!");
 	    $retstat++;
 	}
 	unlink $eltmp;
 
+	# Now set the config spec back to what it was and we're done.
 	open(CSTMP, ">$cstmp") || die Msg('E', "$cstmp: $!");
 	print CSTMP @orig;
 	close(CSTMP) || die Msg('E', "$cstmp: $!");
-
 	if ($ct->setcs($cstmp)->system) {
 	    die Msg('W', "your config spec is broken! - original is in $cstmp");
 	}
-
 	unlink $cstmp;
     }
     exit $retstat;
@@ -352,20 +359,25 @@ sub edattr {
     my $cstmp = ".$::prog.edattr.cs.$$";
 
     if ($opt{view}) {
+	my($csum_pre, $csum_post) = (0, 0);
 	my $tag = ViewTag(@ARGV);
 	GetOptions(\%opt, qw(tag=s));
-	Assert(@ARGV == 0);	# die with usage msg if untrue
+	Assert(@ARGV == 0);	# no file args allowed
 	my @cs = $ct->catcs(['-tag', $tag])->qx;
 	my @rest = grep !m%^##:\w+:%, @cs;
 	my @attrs = map {m%^##:(\w+):\s*(\S*)%; "$1=$2\n"}
 		    grep m%^##:(\w+):%, @cs;
 	open(EDTMP, ">$edtmp") || die Msg('E', "$edtmp: $!");
-	print EDTMP @attrs;
+	for (@attrs) {
+	    $csum_pre += unpack("%16C*", $_);
+	    print EDTMP $_;
+	}
 	close(EDTMP) || die Msg('E', "$edtmp: $!");
 	Argv->new($editor, $edtmp)->system;
 	open(EDTMP, $edtmp) || die Msg('E', "$edtmp: $!");
 	my %nattrs;
 	for (<EDTMP>) {
+	    $csum_post += unpack("%16C*", $_);
 	    chomp;
 	    next if /(^\s*#|^\s*$)/;
 	    my($attr, $val) = split(/=/, $_, 2);
@@ -378,6 +390,8 @@ sub edattr {
 	}
 	close(EDTMP) || die Msg('E', "$edtmp: $!");
 	unlink $edtmp;
+	# No need to reset the config spec if editor didn't change it.
+	exit 0 if $csum_pre == $csum_post;
 	open(CSTMP, ">$cstmp") || die Msg('E', "$cstmp: $!");
 	for (sort keys %nattrs) {
 	    printf CSTMP "%-10s %s\n", "##:$_:", $nattrs{$_};
@@ -815,7 +829,7 @@ sub setview {
     for (grep /^(CLEARCASE_)?ARGV_/, keys %ENV) { delete $ENV{$_} }
 
     if (!MSWIN) {
-	ClearCase::Argv->ctcmd(0);	# CtCmd setview doesn't work right
+	ClearCase::Argv->mustexec(1);	# CtCmd setview doesn't work right
 	return 0;
     }
 

@@ -12,3 +12,7 @@ Revision history for Perl extension ClearCase::Wrapper::DSB.
 1.03 Mon Feb  4 11:12:09 EST 2002
 	- Added 'ct lsregion -curr' feature.
 	- Added 'ct catcs -attr -all' feature.
+
+1.04 Tue Feb  5 13:20:36 EST 2002
+	- Fixed inappropriate dependency on CtCmd in workon.
+	- Cleaned/speeded up 'edattr -view' feature.
