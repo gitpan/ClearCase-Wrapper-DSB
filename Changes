@@ -16,3 +16,6 @@ Revision history for Perl extension ClearCase::Wrapper::DSB.
 1.04 Tue Feb  5 13:20:36 EST 2002
 	- Fixed inappropriate dependency on CtCmd in workon.
 	- Cleaned/speeded up 'edattr -view' feature.
+
+1.05 Fri Mar  1 10:45:40 EST 2002
+	- Cleaned up 'eclipse' extension.

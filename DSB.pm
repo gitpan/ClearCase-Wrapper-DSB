@@ -1,6 +1,6 @@
 package ClearCase::Wrapper::DSB;
 
-$VERSION = '1.04';
+$VERSION = '1.05';
 
 use AutoLoader 'AUTOLOAD';
 
@@ -266,13 +266,14 @@ sub eclipse {
     require File::Copy;
 
     Assert(@ARGV > 1);	# die with usage msg if untrue
-    shift @ARGV;	# dump the command name, leaving only files to eclipse
+    shift @ARGV;	# dump the cmd name leaving only the elems to eclipse
 
-    # Create a cleartool object that will exit on failure of any CC op.
-    my $ct = ClearCase::Argv->new({-autofail=>1});
+    # Create a cleartool object.
+    my $ct = ClearCase::Argv->new;
 
     # Retrieve the original config spec.
     my @orig = $ct->catcs->qx;
+    exit 2 if $?;
 
     my $retstat = 0;
     for my $elem (@ARGV) {

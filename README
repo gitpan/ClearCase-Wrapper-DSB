@@ -1,4 +1,4 @@
-ClearCase/Wrapper/DSB version 0.01
+ClearCase::Wrapper::DSB
 ==================================
 
 PURPOSE
@@ -6,7 +6,11 @@ PURPOSE
 This is an overlay module for ClearCase::Wrapper. See the POD for that
 module. The short version is that ClearCase::Wrapper provides a
 mechanism for extending cleartool while ClearCase::Wrapper::DSB
-supplies a number of extensions using that mechanism.
+supplies a number of extensions using that mechanism. At one time they
+were mixed together but then I worked out the overlay mechanism and
+separated them, such that the most basic extensions remain in
+ClearCase::Wrapper and the more optional/frivolous ones are in
+ClearCase::Wrapper::DSB.
 
 INSTALLATION
 
@@ -16,6 +20,16 @@ To install this module type the following:
    make
    make test
    make install
+
+VERSIONS
+
+Note that there is no strict correlation between versions of the
+base module and overlay modules. I.e. you do not necessarily need
+ClearCase::Wrapper::DSB 1.04 if you have ClearCase::Wrapper 1.04.
+If an overlay requires a certain feature in the base module this
+dependency will be noted in the prerequisites within Makefile.PL.
+In other words, if the install sequence doesn't generate a warning
+you should be ok.
 
 DEPENDENCIES
 
