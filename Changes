@@ -19,3 +19,13 @@ Revision history for Perl extension ClearCase::Wrapper::DSB.
 
 1.05 Fri Mar  1 10:45:40 EST 2002
 	- Cleaned up 'eclipse' extension.
+
+1.06 Tue May  7 10:22:32 EDT 2002
+	- Minor formatting improvements.
+	- Added -needed flag to setcs.
+
+1.07 Fri Oct 18 12:10:40 EDT 2002
+	- Override 'rmelem' to flush the view cache when done.
+	- Override 'update' to add -quiet flag (suppress "Loading ..." msgs)
+	- New 'protectview' command by analogy with 'protectvob'.
+	  Doesn't yet support -chown or -chgrp, just -add and -delete.

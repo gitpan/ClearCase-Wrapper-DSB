@@ -1,6 +1,6 @@
 package ClearCase::Wrapper::DSB;
 
-$VERSION = '1.05';
+$VERSION = '1.07';
 
 use AutoLoader 'AUTOLOAD';
 
@@ -14,12 +14,13 @@ use strict;
    no strict 'vars';
 
    # Usage message additions for actual cleartool commands that we extend.
-   $catcs	= "\n* [-cmnt|-expand|-sources|-start]";
+   $catcs	= "\n\t   * [-cmnt|-expand|-sources|-start]";
    $lock	= "\n* [-allow|-deny login-name[,...]] [-iflocked]";
    $lsregion	= " * [-current]";
    $mklabel	= "\n* [-up]";
-   $setcs	= "\n\t     * [-clone view-tag] [-expand] [-sync]";
+   $setcs	= "\n\t   * [-clone view-tag] [-expand] [-sync|-needed]";
    $setview	= "\n\t     * [-me] [-drive drive:] [-persistent]";
+   $update	= "\n* [-quiet]";
    $winkin	= "\n* [-vp] [-tag view-tag]";
 
    # Usage messages for pseudo cleartool commands that we implement here.
@@ -29,6 +30,10 @@ use strict;
    $eclipse	= "$0 element ...";
    $edattr	= "$0 [-view [-tag view-tag]] | [-element] object-selector ...";
    $grep	= "$0 [grep-flags] pattern element";
+   $protectview	= "$0 [-force]
+                    [-add_group group-name[,...]]
+                    [-delete_group group-name[,...]]
+                    view-storage-dir-pname ...";
    $recheckout	= "$0 pname ...";
    $winkout	= "$0 [-dir|-rec|-all] [-f file] [-pro/mote] [-do]
 		[-meta file [-print] file ...";
@@ -121,10 +126,10 @@ And to print all attributes:
 
 =item 4. New B<-start> flag
 
-Prints the preferred I<initial working directory> of a view by
-examining its config spec. This is simply the value of the
-C<Start> attribute as described above and thus I<-start> is
-a synonym for I<-attr Start>.
+Prints the I<preferred initial working directory> of a view by
+examining its config spec. This is simply the value of the C<Start>
+attribute as described above; in other words I<-start> is a synonym for
+I<-attr Start>.
 
 The B<workon> command (see) uses this value.  E.g., using B<workon>
 instead of B<setview> with the config spec:
@@ -330,15 +335,15 @@ sub eclipse {
 New command, inspired by the I<edcs> cmd.  B<Edattr> dumps the
 attributes of the specified object into a temp file, then execs your
 favorite editor on it, and adds, removes or modifies the attributes as
-appropriate after you exit the editor.  Attribute types are created and
-deleted automatically.  This is particularly useful on Unix platforms
-because as of CC 3.2 the Unix GUI doesn't support modification of
-attributes and the quoting rules make it difficult to use the
-command line.
+appropriate after you've modified the temp file and exited the editor.
+Attribute types are created and deleted automatically.  This is
+particularly useful on Unix platforms because as of CC 3.2 the Unix GUI
+doesn't support modification of attributes and the quoting rules make
+it difficult to use the command line.
 
-However, if the B<-view> flag is used I<view attributes> are edited
-instead. See the enhanced I<catcs> command for further discussion of
-view attributes.
+If the B<-view> flag is used I<view attributes> are edited instead. See
+the enhanced I<catcs> command for further discussion of view
+attributes.
 
 The environment variables WINEDITOR, VISUAL, and EDITOR are checked
 in that order for editor names. If none of the above are set, the
@@ -708,6 +713,78 @@ sub mount {
     exit 0;
 }
 
+=item * PROTECTVIEW
+
+Analogous to the native ClearCase command I<protectvob> (see). Adds or
+subtracts group permissions for one or more views. Groups may be
+specified as names or numeric IDs in the same format accepted by
+I<protectvob>.
+
+Warning: this operation will not work on a running view. Views must be
+manually stopped (C<endview -server>) before reprotecting.
+
+=cut
+
+sub protectview {
+    die Msg('E', "not yet supported on Windows") if MSWIN;
+    my %opt;
+    GetOptions(\%opt, qw(force add_group=s delete_group=s chown=s chgrp=s));
+    die Msg('E', "-chown and -chgrp are not yet implemented")
+						if $opt{chown} || $opt{chgrp};
+    shift @ARGV;
+    Assert(@ARGV > 0);	# die with usage msg if no vws area specified
+    Assert(%opt);
+    my $rc = 0;
+    for my $vws (@ARGV) {
+	if (! $opt{force}) {
+	    my $prompt = qq(Protect view "$vws"?);
+	    require ClearCase::ClearPrompt;
+	    next if ClearCase::ClearPrompt::clearprompt(
+			    qw(yes_no -def n -type ok -pro), $prompt);
+	}
+	if (-e "$vws/.pid") {
+	    warn Msg('W', "cannot protect running view $vws");
+	    $rc = 1;
+	    next;
+	}
+	if ($opt{delete_group}) {
+	    for (split ',', $opt{delete_group}) {
+		my $gid = /^\d+$/ ? $_ : (getgrnam($_))[2];
+		if (! $gid) {
+		    warn Msg('W', "no such group: $_");
+		    $rc = 1;
+		    next;
+		}
+		my $grp = "$vws/.identity/group.$gid";
+		unlink($grp);
+	    }
+	}
+	if ($opt{add_group}) {
+	    for (split ',', $opt{add_group}) {
+		my $gid = /^\d+$/ ? $_ : (getgrnam($_))[2];
+		if (! $gid) {
+		    warn Msg('W', "no such group: $_");
+		    $rc = 1;
+		    next;
+		}
+		my $grp = "$vws/.identity/group.$gid";
+		if (! open(GID, ">$grp")) {
+		    warn Msg('W', "$vws: unable to add group $_");
+		    $rc = 1;
+		    next;
+		}
+		close(GID);
+		if (! chown(-1, $gid, $grp) || ! chmod(0102410, $grp)) {
+		    warn Msg('W', "$vws: unable to add group $_: $!");
+		    $rc = 1;
+		    next;
+		}
+	    }
+	}
+    }
+    exit($rc);
+}
+
 =item * RECO/RECHECKOUT
 
 Redoes a checkout without the database operations by simply copying the
@@ -741,6 +818,22 @@ sub recheckout {
     exit 0;
 }
 
+=item * RMELEM
+
+It appears that when elements are removed with B<rmelem> they often
+remain visible for quite a while due to some kind of view cache,
+though attempts to actually open them result in an I/O error. Running
+I<cleartool setcs -current> clears this up. Thus B<rmelem> is
+overridden here to add an automatic view refresh when done.
+
+=cut
+
+sub rmelem {
+    my $rc = ClearCase::Argv->new(@ARGV)->system;
+    ClearCase::Argv->setcs(['-current'])->system unless $rc;
+    exit($rc >> 8);
+}
+
 =item * SETCS
 
 Adds a B<-clone> flag which lets you specify another view from which to copy
@@ -752,6 +845,10 @@ I<compiled_spec> file is out of date with respect to the I<config_spec>
 source file or any file it includes. In other words: B<setcs -sync> is
 to B<setcs -current> as B<make foo.o> is to B<cc -c foo.c>.
 
+Adds a B<-needed> flag. This is similar to B<-sync> above but it
+doesn't recompile the config spec. Instead, it simply indicates with
+its return code whether a recompile is in order.
+
 Adds a B<-expand> flag, which "flattens out" the config spec by
 inlining the contents of any include files.
 
@@ -759,10 +856,12 @@ inlining the contents of any include files.
 
 sub setcs {
     my %opt;
-    GetOptions(\%opt, qw(clone=s expand sync));
+    GetOptions(\%opt, qw(clone=s expand needed sync));
     die Msg('E', "-expand and -sync are mutually exclusive")
 					    if $opt{expand} && $opt{sync};
-    my $tag = ViewTag(@ARGV) if $opt{expand} || $opt{sync} || $opt{clone};
+    die Msg('E', "-expand and -needed are mutually exclusive")
+					    if $opt{expand} && $opt{needed};
+    my $tag = ViewTag(@ARGV) if grep /^(expand|sync|needed|clone)$/, keys %opt;
     if ($opt{expand}) {
 	my $ct = Argv->new([$^X, '-S', $0]);
 	my $settmp = ".$::prog.setcs.$$";
@@ -772,18 +871,23 @@ sub setcs {
 	$ct->opts('setcs', $settmp)->system;
 	unlink $settmp;
 	exit $?;
-    } elsif ($opt{sync}) {
+    } elsif ($opt{sync} || $opt{needed}) {
 	chomp(my @srcs = qx($^X -S $0 catcs -sources -tag $tag));
 	exit 2 if $?;
 	(my $obj = $srcs[0]) =~ s/config_spec/.compiled_spec/;
 	die Msg('E', "$obj: no such file") if ! -f $obj;
 	die Msg('E', "no permission to update $tag's config spec") if ! -w $obj;
 	my $otime = (stat $obj)[9];
-	for (@srcs) {
-	    ClearCase::Argv->setcs(qw(-current -tag), $tag)->exec
-						    if (stat $_)[9] > $otime;
+	my $needed = grep { (stat $_)[9] > $otime } @srcs;
+	if ($opt{sync}) {
+	    if ($needed) {
+		ClearCase::Argv->setcs(qw(-current -tag), $tag)->exec;
+	    } else {
+		exit 0;
+	    }
+	} else {
+	    exit $needed;
 	}
-	exit 1;
     } elsif ($opt{clone}) {
 	my $ct = ClearCase::Argv->new;
 	my $ctx = $ct->cleartool;
@@ -807,7 +911,7 @@ new ones: B<-persistent> and B<-window>.
 If the view is already mapped to a drive letter that drive is used.
 If not, the first available drive working backwards from Z: is used.
 Without B<-persistent> a drive mapped by setview will be unmapped
-when the setview process is existed.
+when the setview process is exited.
 
 With the B<-window> flag, a new window is created for the setview. A
 beneficial side effect of this is that Ctrl-C handling within this new
@@ -895,6 +999,28 @@ sub setview {
     }
 }
 
+=item * UPDATE
+
+Adds a B<-quiet> option to strip out all those annoying
+C<Processing dir ...> and C<End dir ...> messages so you can see what
+files actually changed.
+
+=cut
+
+sub update {
+    my %opt;
+    GetOptions(\%opt, qw(quiet));
+    return 0 if !$opt{quiet};
+    my $ct = ClearCase::Argv->find_cleartool;
+    open(CMD, "$ct @ARGV |") || exit(2);
+    while(<CMD>) {
+	next if m%^(?:Processing|End)\s%;
+	next if m%^[.]+$%;
+	print;
+    }
+    exit(close(CMD));
+}
+
 =item * WINKIN
 
 The B<-tag> flag allows you specify a local file path plus another view;
@@ -904,7 +1030,11 @@ the named DO in the named view will be winked into the current view, e.g.:
 
 The B<-vp> flag, when used with B<-tag>, causes the "remote" file to be
 converted into a DO if required before winkin is attempted. See the
-B<winkout> extension for details.
+B<winkout> extension for details. I<Note: this feature depends on
+C<setview> and thus will not work on Windows where setview has been
+removed. However, it would be possible to re-code it to use the setview
+emulation provided in this same package if you really want the
+feature on Windows.>
 
 =cut
 
@@ -938,9 +1068,9 @@ sub winkin {
 =item * WINKOUT
 
 The B<winkout> pseudo-cmd takes a set of view-private files as
-arguments and, using clearaudit, makes them into derived objects. The
+arguments and, using clearaudit, turns them into derived objects. The
 config records generated are meaningless but the mere fact of being a
-DO makes a file eligible for forced winkin.
+DO makes a file eligible for forced winkin from another view.
 
 If the B<-promote> flag is given, the view scrubber will be run on
 these new DO's. This has the effect of promoting them to the VOB and
@@ -948,7 +1078,7 @@ winking them back into the current view.
 
 If a meta-DO filename is specified with B<-meta>, this file is created
 as a DO and caused to reference all the other new DO's, thus defining a
-I<DO set> and allowing the entire set to be winked in using the meta-DO
+B<DO set> and allowing the entire set to be winked in using the meta-DO
 as a hook. E.g. assuming view-private files X, Y, and Z already exist:
 
 	ct winkout -meta .WINKSET X Y Z
@@ -965,8 +1095,8 @@ B<-dir/-rec/-all/-avobs>, provided in a file containing a list of files
 with B<-flist>, or specified as a literal list of view-private files.
 When using B<-dir/-rec/-all/-avobs> to derive the file list only the
 output of C<lsprivate -other> is considered unless B<-do> is used;
-B<-do> causes existing DO's to be re-converted. Use B<-do> with
-care as it may convert a useful CR to a meaningless one.
+B<-do> causes existing DO's to be re-converted. Use B<-do> with care as
+it may convert a useful CR to a meaningless one.
 
 The B<"-flist -"> flag can be used to read the file list from stdin,
 which may be useful in a script.
@@ -974,7 +1104,7 @@ which may be useful in a script.
 =cut
 
 sub winkout {
-    warn Msg('E', "it may be possible to get this working on &%@# Windows but I haven't tried") if MSWIN;
+    warn Msg('E', "this may work on &%@# Windows but I haven't tried") if MSWIN;
     my %opt;
     GetOptions(\%opt, qw(directory recurse all avobs flist=s
 					do meta=s print promote));
@@ -1036,11 +1166,11 @@ sub winkout {
     # Convert regular view-privates into DO's by opening them
     # under clearaudit control.
     {
-	my $clearaudit = '/usr/atria/bin/clearaudit';
+	my $clearaudit = MSWIN ? 'clearaudit' : '/usr/atria/bin/clearaudit';
 	local $ENV{CLEARAUDIT_SHELL} = $^X;
 	my $ecmd = 'chomp; open(DO, ">>$_") || warn "Error: $_: $!\n"';
 	my $cmd = qq($clearaudit -n -e '$ecmd');
-	$cmd = "set -x; $cmd" if $dbg;
+	$cmd = "set -x; $cmd" if $dbg && !MSWIN;
 	open(AUDIT, "| $cmd") || die Msg('E', "$cmd: $!");
 	for (@dolist) {
 	    print AUDIT $_, "\n";
@@ -1051,9 +1181,9 @@ sub winkout {
 				"Exit status @{[$?>>8]} from clearaudit");
     }
     if ($opt{promote}) {
-	my $scrubber = '/usr/atria/etc/view_scrubber';
+	my $scrubber = MSWIN ? 'view_scrubber' : '/usr/atria/etc/view_scrubber';
 	my $cmd = "$scrubber -p";
-	$cmd = "set -x; $cmd" if $dbg;
+	$cmd = "set -x; $cmd" if $dbg && !MSWIN;
 	open(SCRUBBER, "| $cmd") || die Msg('E', "$scrubber: $!");
 	for (@dolist) { print SCRUBBER $_, "\n" }
 	close(SCRUBBER) || die Msg('E', $! ?
