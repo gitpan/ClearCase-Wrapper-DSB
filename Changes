@@ -32,3 +32,6 @@ Revision history for Perl extension ClearCase::Wrapper::DSB.
 
 1.08 Tue Feb  4 21:10:35 EST 2003
 	- Added -chown/chgrp/-chmod plus -tag and -replace to protectview.
+
+1.09 Tue Jul 22 10:56:06 EDT 2003
+	- Fixed contact data.

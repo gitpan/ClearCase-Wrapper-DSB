@@ -1,6 +1,6 @@
 package ClearCase::Wrapper::DSB;
 
-$VERSION = '1.08';
+$VERSION = '1.09';
 
 use AutoLoader 'AUTOLOAD';
 
@@ -1388,7 +1388,7 @@ sub _inview {
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (c) 1997-2002 David Boyce (dsb@boyski.com). All rights
+Copyright (c) 1997-2002 David Boyce (dsbperl@cleartool.com). All rights
 reserved.  This Perl program is free software; you may redistribute it
 and/or modify it under the same terms as Perl itself.
 
