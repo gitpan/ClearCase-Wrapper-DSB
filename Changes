@@ -1,0 +1,6 @@
+Revision history for Perl extension ClearCase::Wrapper::DSB.
+
+1.01 Fri Jan 25 09:38:23 EST 2002
+	- original version
+	  Much of the original content of ClearCase::Wrapper has
+	  been split out into this overlay module.
