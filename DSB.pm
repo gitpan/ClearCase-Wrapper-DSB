@@ -1,6 +1,6 @@
 package ClearCase::Wrapper::DSB;
 
-$VERSION = '1.07';
+$VERSION = '1.08';
 
 use AutoLoader 'AUTOLOAD';
 
@@ -30,10 +30,11 @@ use strict;
    $eclipse	= "$0 element ...";
    $edattr	= "$0 [-view [-tag view-tag]] | [-element] object-selector ...";
    $grep	= "$0 [grep-flags] pattern element";
-   $protectview	= "$0 [-force]
+   $protectview	= "$0 [-force] [-replace]
+                    [-chown login-name] [-chgrp group-name] [-chmod permissions]
                     [-add_group group-name[,...]]
                     [-delete_group group-name[,...]]
-                    view-storage-dir-pname ...";
+		    {-tag view-tag | view-storage-dir-pname ...}";
    $recheckout	= "$0 pname ...";
    $winkout	= "$0 [-dir|-rec|-all] [-f file] [-pro/mote] [-do]
 		[-meta file [-print] file ...";
@@ -715,27 +716,50 @@ sub mount {
 
 =item * PROTECTVIEW
 
-Analogous to the native ClearCase command I<protectvob> (see). Adds or
-subtracts group permissions for one or more views. Groups may be
-specified as names or numeric IDs in the same format accepted by
-I<protectvob>.
+Modifies user or group permissions for one or more views.
+Analogous to the native ClearCase command I<protectvob> (see).
+Most flags accepted by B<protectview> behave similarly to those
+of I<protectvob>.
 
-Warning: this operation will not work on a running view. Views must be
-manually stopped (C<endview -server>) before reprotecting.
+The B<-replace> flag is special; it uses the administrative I<fix_prot>
+tool to completely replace any pre-existing identity information. This
+gives the view's permissions a "clean start"; in particular, any grants
+of access to other groups will be removed.
+
+This operation will not work on a running view. Views must be
+manually stopped with C<endview -server> before reprotection may proceed.
+
+B<Warning>: this is an experimental interface which has not been tested
+in all scenarios. It cannot destroy any data, so there's nothing it
+could break which could't be fixed with an administrator's help, but it
+should still be used with care.  In particular, it's possible to
+specify values to B<-chmod> which will confuse the view greatly.
 
 =cut
 
 sub protectview {
     die Msg('E', "not yet supported on Windows") if MSWIN;
     my %opt;
-    GetOptions(\%opt, qw(force add_group=s delete_group=s chown=s chgrp=s));
-    die Msg('E', "-chown and -chgrp are not yet implemented")
-						if $opt{chown} || $opt{chgrp};
-    shift @ARGV;
+    GetOptions(\%opt, qw(force replace tag=s add_group=s delete_group=s
+				    chown=s chgrp=s chmod=s));
+    my $cmd = shift @ARGV;
+    if ($opt{tag}) {
+	Assert(@ARGV == 0);	# -tag and vws area are mutually exclusive
+	my($vws) = (split ' ', ClearCase::Argv->lsview($opt{tag})->qx)[-1];
+	push(@ARGV, $vws);
+    }
     Assert(@ARGV > 0);	# die with usage msg if no vws area specified
-    Assert(%opt);
+    Assert(scalar %opt, 'no options specified');
+    die Msg('E', "$cmd -chown requires administrative privileges")
+						    if $opt{chown} && $> != 0;
     my $rc = 0;
     for my $vws (@ARGV) {
+	my $idedir = "$vws/.identity";
+	if (! -f "$vws/config_spec" || ! -d $idedir) {
+	    warn Msg('W', "not a view storage area: $vws");
+	    $rc = 1;
+	    next;
+	}
 	if (! $opt{force}) {
 	    my $prompt = qq(Protect view "$vws"?);
 	    require ClearCase::ClearPrompt;
@@ -743,9 +767,57 @@ sub protectview {
 			    qw(yes_no -def n -type ok -pro), $prompt);
 	}
 	if (-e "$vws/.pid") {
-	    warn Msg('W', "cannot protect running view $vws");
-	    $rc = 1;
-	    next;
+	    if ($opt{force}) {
+		my $tag = $opt{tag};
+		$tag ||= ClearCase::Argv->lsview([qw(-s -storage)], $vws)->qx;
+		chomp $tag;
+		ClearCase::Argv->endview([qw(-server)], $tag)->system;
+	    }
+	    if (-e "$vws/.pid") {
+		warn Msg('W', "cannot protect running view $vws");
+		$rc = 1;
+		next;
+	    }
+	}
+	if ($opt{chown} || $opt{chgrp} || $opt{chmod}) {
+	    my $uid = $opt{chown} || (stat "$idedir/uid")[4];
+	    $uid = (getpwnam($uid))[2] unless $uid =~ /^\d+$/;
+	    my $gid = $opt{chgrp} || (stat "$idedir/gid")[5];
+	    $gid = (getgrnam($gid))[2] unless $gid =~ /^\d+$/;
+	    if ($opt{replace}) {
+		my $fp = Argv->new('/usr/atria/etc/utils/fix_prot');
+		$fp->opts(qw(-root -recurse));
+		$fp->opts($fp->opts, '-force')  if $opt{force};
+		$fp->opts($fp->opts, '-chown', $uid);
+		$fp->opts($fp->opts, '-chgrp', $gid);
+		$fp->opts($fp->opts, '-chmod', $opt{chmod}) if $opt{chmod};
+		$fp->args($vws);
+		if ($fp->system) {
+		    $rc = 1;
+		    next;
+		}
+	    } else {
+		if ($opt{chown} || $opt{chgrp}) {
+		    unlink("$idedir/group.$gid") if $opt{chgrp};
+		    if (Argv->chown([qw(-R -h)], "$uid:$gid", $vws)->system) {
+			$rc = 1;
+			next;
+		    }
+		}
+		if ($opt{chmod}) {
+		    if (Argv->chmod(['-R'], $opt{chmod}, $vws)->system) {
+			$rc = 1;
+			next;
+		    }
+		    for my $grp (glob("$idedir/group.*")) {
+			chmod(0102410, $grp) || warn Msg('W', "$grp: $!");
+		    }
+		}
+		chmod(0104400, "$idedir/uid") ||
+					    warn Msg('W', "$idedir/uid: $!");
+		chmod(0102410, "$idedir/gid") ||
+					    warn Msg('W', "$idedir/gid: $!");
+	    }
 	}
 	if ($opt{delete_group}) {
 	    for (split ',', $opt{delete_group}) {
@@ -755,7 +827,7 @@ sub protectview {
 		    $rc = 1;
 		    next;
 		}
-		my $grp = "$vws/.identity/group.$gid";
+		my $grp = "$idedir/group.$gid";
 		unlink($grp);
 	    }
 	}
@@ -767,7 +839,8 @@ sub protectview {
 		    $rc = 1;
 		    next;
 		}
-		my $grp = "$vws/.identity/group.$gid";
+		my $grp = "$idedir/group.$gid";
+		unlink($grp);
 		if (! open(GID, ">$grp")) {
 		    warn Msg('W', "$vws: unable to add group $_");
 		    $rc = 1;

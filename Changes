@@ -29,3 +29,6 @@ Revision history for Perl extension ClearCase::Wrapper::DSB.
 	- Override 'update' to add -quiet flag (suppress "Loading ..." msgs)
 	- New 'protectview' command by analogy with 'protectvob'.
 	  Doesn't yet support -chown or -chgrp, just -add and -delete.
+
+1.08 Tue Feb  4 21:10:35 EST 2003
+	- Added -chown/chgrp/-chmod plus -tag and -replace to protectview.
