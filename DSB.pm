@@ -1,6 +1,6 @@
 package ClearCase::Wrapper::DSB;
 
-$VERSION = '1.02';
+$VERSION = '1.03';
 
 use AutoLoader 'AUTOLOAD';
 
@@ -16,9 +16,10 @@ use strict;
    # Usage message additions for actual cleartool commands that we extend.
    $catcs	= "\n* [-cmnt|-expand|-sources|-start]";
    $lock	= "\n* [-allow|-deny login-name[,...]] [-iflocked]";
+   $lsregion	= " * [-current]";
    $mklabel	= "\n* [-up]";
    $setcs	= "\n\t     * [-clone view-tag] [-expand] [-sync]";
-   $setview	= "* [-me] [-drive drive:] [-persistent]";
+   $setview	= "\n\t     * [-me] [-drive drive:] [-persistent]";
    $winkin	= "\n* [-vp] [-tag view-tag]";
 
    # Usage messages for pseudo cleartool commands that we implement here.
@@ -551,6 +552,36 @@ sub lock {
     $lock->exec;
 }
 
+=item * LSREGION
+
+A surprising lapse of the real cleartool CLI is that there's no
+way to determine the current region. This extension adds a
+B<-current> flag to lsregion.
+
+=cut
+
+sub lsregion {
+    my %opt;
+    # -cu999 is only to enforce -cur/rent
+    GetOptions(\%opt, qw(current cu999));
+    return 0 unless $opt{current};
+    if (MSWIN) {
+	use vars '%RegHash';
+	require Win32::TieRegistry;
+	Win32::TieRegistry->import('TiedHash', '%RegHash');
+	my $region = $RegHash{LMachine}->{SOFTWARE}->
+		{Atria}->{ClearCase}->{CurrentVersion}->{Region};
+	print $region, "\n";
+    } else {
+	my $regfile = '/var/adm/atria/rgy/rgy_region.conf';
+	open(REGFILE, $regfile) || die Msg('E', "$regfile: $!");
+	my $region = <REGFILE>;
+	close(REGFILE);
+	print $region;
+    }
+    exit 0;
+}
+
 =item * MKBRTYPE,MKLBTYPE
 
 Modification: if user tries to make a type in the current VOB without
@@ -896,9 +927,9 @@ arguments and, using clearaudit, makes them into derived objects. The
 config records generated are meaningless but the mere fact of being a
 DO makes a file eligible for forced winkin.
 
-If the B<-promote> flag is given, the view scrubber will be run on the
-new DO's. This has the effect of promoting them to the VOB and winking
-them back into the current view.
+If the B<-promote> flag is given, the view scrubber will be run on
+these new DO's. This has the effect of promoting them to the VOB and
+winking them back into the current view.
 
 If a meta-DO filename is specified with B<-meta>, this file is created
 as a DO and caused to reference all the other new DO's, thus defining a
