@@ -1,6 +1,6 @@
 package ClearCase::Wrapper::DSB;
 
-$VERSION = '1.09';
+$VERSION = '1.11';
 
 use AutoLoader 'AUTOLOAD';
 
@@ -15,6 +15,7 @@ use strict;
 
    # Usage message additions for actual cleartool commands that we extend.
    $catcs	= "\n\t   * [-cmnt|-expand|-sources|-start]";
+   $describe	= "\n* [--par/ents <n>]";
    $lock	= "\n* [-allow|-deny login-name[,...]] [-iflocked]";
    $lsregion	= " * [-current]";
    $mklabel	= "\n* [-up]";
@@ -24,26 +25,30 @@ use strict;
    $winkin	= "\n* [-vp] [-tag view-tag]";
 
    # Usage messages for pseudo cleartool commands that we implement here.
-   local $0 = $ARGV[0] || '';
-   $comment	= "$0 [-new] [-element] object-selector ...";
-   $diffcs	= "$0 view-tag-1 [view-tag-2]";
-   $eclipse	= "$0 element ...";
-   $edattr	= "$0 [-view [-tag view-tag]] | [-element] object-selector ...";
-   $grep	= "$0 [grep-flags] pattern element";
-   $protectview	= "$0 [-force] [-replace]
+   # Note: we used to localize $0 but that turns out to trigger a bug
+   # in perl 5.6.1.
+   my $z = $ARGV[0] || '';
+   $comment	= "$z [-new] [-element] object-selector ...";
+   $diffcs	= "$z view-tag-1 [view-tag-2]";
+   $eclipse	= "$z element ...";
+   $edattr	= "$z [-view [-tag view-tag]] | [-element] object-selector ...";
+   $grep	= "$z [grep-flags] pattern element";
+   $protectview	= "$z [-force] [-replace]
                     [-chown login-name] [-chgrp group-name] [-chmod permissions]
                     [-add_group group-name[,...]]
                     [-delete_group group-name[,...]]
 		    {-tag view-tag | view-storage-dir-pname ...}";
-   $recheckout	= "$0 pname ...";
-   $winkout	= "$0 [-dir|-rec|-all] [-f file] [-pro/mote] [-do]
+   $recheckout	= "$z [-keep|-rm] pname ...";
+   $winkout	= "$z [-dir|-rec|-all] [-f file] [-pro/mote] [-do]
 		[-meta file [-print] file ...";
-   $workon	= "$0 [-me] [-login] [-exec command-invocation] view-tag";
+   $workon	= "$z [-me] [-login] [-exec command-invocation] view-tag";
 }
 
 #############################################################################
 # Command Aliases
 #############################################################################
+*des		= *describe;
+*desc		= *describe;
 *edcmnt		= *comment;
 *egrep		= *grep;
 *mkbrtype	= *mklbtype;	# not synonyms but the code's the same
@@ -133,7 +138,7 @@ attribute as described above; in other words I<-start> is a synonym for
 I<-attr Start>.
 
 The B<workon> command (see) uses this value.  E.g., using B<workon>
-instead of B<setview> with the config spec:
+instead of I<setview> with the config spec:
 
     ##:Start: /vobs_fw/src/java
     element * CHECKEDOUT
@@ -227,6 +232,43 @@ sub comment {
 	unlink $edtmp;
     }
     exit $retstat;
+}
+
+=item * DESCRIBE
+
+Enhancement. Adds the B<-parents> flag, which takes an integer argument
+I<N> and runs the I<describe> command on the version I<N> predecessors
+deep instead of the currently-selected version.
+into temp files and diffs them. If only one view is specified, compares
+against the current working view's config spec.
+
+=cut
+
+sub describe {
+    my $desc = ClearCase::Argv->new(@ARGV);
+    $desc->optset(qw(CC WRAPPER));
+
+    $desc->parseCC(qw(g|graphical local l|long s|short 
+	    fmt=s alabel=s aattr=s ahlink=s ihlink=s
+	    cview version=s ancestor
+	    predecessor pname type=s cact));
+    $desc->parseWRAPPER(qw(parents|par9999=s));
+    my $generations = abs($desc->flagWRAPPER('parents') || 0);
+    if ($generations) {
+	my $pred = ClearCase::Argv->desc([qw(-fmt %En@@%PVn)]);
+	$pred->autofail(1);
+	my @nargs;
+	my @args = $desc->args;
+	for my $arg (@args) {
+	    my $narg = $arg;
+	    for (my $i = $generations; $i; $i--) {
+		$narg = $pred->args($narg)->qx;
+	    }
+	    push(@nargs, $narg);
+	}
+	$desc->args(@nargs);
+    }
+    $desc->exec('CC');
 }
 
 =item * DIFFCS
@@ -863,13 +905,16 @@ sub protectview {
 Redoes a checkout without the database operations by simply copying the
 contents of the existing checkout's predecessor over the view-private
 checkout file. The previous contents are moved aside to "<element>.reco".
+The B<-keep> and B<-rm> options are honored by analogy with I<uncheckout>.
 
 =cut
 
 sub recheckout {
-    shift;
+    my %opt;
+    GetOptions(\%opt, qw(keep rm));
+    shift @ARGV;
     require File::Copy;
-    for (@_) {
+    for (@ARGV) {
 	$_ = readlink if -l && defined readlink;
 	if (! -w $_) {
 	    warn Msg('W', "$_: not checked out");
@@ -887,16 +932,17 @@ sub recheckout {
 	} else {
 	    die Msg('E', "cannot rename $_ to $keep: $!");
 	}
+	unlink $keep if $opt{rm};
     }
     exit 0;
 }
 
 =item * RMELEM
 
-It appears that when elements are removed with B<rmelem> they often
+It appears that when elements are removed with I<rmelem> they often
 remain visible for quite a while due to some kind of view cache,
 though attempts to actually open them result in an I/O error. Running
-I<cleartool setcs -current> clears this up. Thus B<rmelem> is
+I<cleartool setcs -current> clears this up. Thus I<rmelem> is
 overridden here to add an automatic view refresh when done.
 
 =cut
@@ -1388,7 +1434,7 @@ sub _inview {
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (c) 1997-2002 David Boyce (dsbperl@cleartool.com). All rights
+Copyright (c) 1997-2002 David Boyce (dsbperl AT boyski.com). All rights
 reserved.  This Perl program is free software; you may redistribute it
 and/or modify it under the same terms as Perl itself.
 

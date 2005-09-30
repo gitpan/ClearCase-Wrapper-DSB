@@ -35,3 +35,15 @@ Revision history for Perl extension ClearCase::Wrapper::DSB.
 
 1.09 Tue Jul 22 10:56:06 EDT 2003
 	- Fixed contact data.
+
+1.10 Thu Mar 10 11:30:00 EST 2005
+	- Added "describe -par/ents" feature.
+
+1.11 Mon Mar 14 00:00:51 EST 2005
+	- Cleanups occasioned by port to new environment.
+	  Worked around an apparent bug in 5.6.1: the statement
+	  "local $0 = ..." causes the user's PATH to be trashed such
+	  that $ENV{PATH} looks ok but "system qw(printenv PATH)"
+	  doesn't. It's hard to see how that could be my bug but
+	  in any case it's not a problem in more modern Perls so
+	  I just worked around it.
