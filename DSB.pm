@@ -1,6 +1,6 @@
 package ClearCase::Wrapper::DSB;
 
-$VERSION = '1.11';
+$VERSION = '1.12';
 
 use AutoLoader 'AUTOLOAD';
 
@@ -289,7 +289,7 @@ sub diffcs {
 	push(@tags, $cwv) if $cwv;
     }
     die Msg('E', "two view-tag arguments required") if @tags != 2;
-    my $ct = ClearCase::Argv->cleartool;
+    my $ct = ClearCase::Argv->find_cleartool;
     my @cstmps = map {"$_.cs"} @tags;
     for my $i (0..1) {
 	Argv->new("$ct catcs -tag $tags[$i] >$cstmps[$i]")->autofail(1)->system;
@@ -1009,7 +1009,7 @@ sub setcs {
 	}
     } elsif ($opt{clone}) {
 	my $ct = ClearCase::Argv->new;
-	my $ctx = $ct->cleartool;
+	my $ctx = $ct->find_cleartool;
 	my $cstmp = ".$ARGV[0].$$.cs.$tag";
 	Argv->autofail(1);
 	Argv->new("$ctx catcs -tag $opt{clone} > $cstmp")->system;

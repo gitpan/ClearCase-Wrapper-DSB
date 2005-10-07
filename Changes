@@ -47,3 +47,9 @@ Revision history for Perl extension ClearCase::Wrapper::DSB.
 	  doesn't. It's hard to see how that could be my bug but
 	  in any case it's not a problem in more modern Perls so
 	  I just worked around it.
+
+1.12 Fri Oct  7 09:30:58 EDT 2005
+	- Fix bug reported by anonymous user. ClearCase::Argv
+	  renamed the ->cleartool method to ->find_cleartool;
+	  this module forgot to track that change till now.
+	  This caused "ct setcs -clone <view-tag>" to fail.
