@@ -1,6 +1,6 @@
 package ClearCase::Wrapper::DSB;
 
-$VERSION = '1.12';
+$VERSION = '1.14';
 
 use AutoLoader 'AUTOLOAD';
 
@@ -14,33 +14,33 @@ use strict;
    no strict 'vars';
 
    # Usage message additions for actual cleartool commands that we extend.
-   $catcs	= "\n\t   * [-cmnt|-expand|-sources|-start]";
+   $catcs	= "\n* [-cmnt|-expand|-sources|-start]";
    $describe	= "\n* [--par/ents <n>]";
    $lock	= "\n* [-allow|-deny login-name[,...]] [-iflocked]";
-   $lsregion	= " * [-current]";
+   $lsregion	= "\n* [-current]";
    $mklabel	= "\n* [-up]";
-   $setcs	= "\n\t   * [-clone view-tag] [-expand] [-sync|-needed]";
-   $setview	= "\n\t     * [-me] [-drive drive:] [-persistent]";
+   $setcs	= "\n* [-clone view-tag] [-expand] [-sync|-needed]";
+   $setview	= "\n* [-me] [-drive drive:] [-persistent]";
    $update	= "\n* [-quiet]";
    $winkin	= "\n* [-vp] [-tag view-tag]";
 
    # Usage messages for pseudo cleartool commands that we implement here.
    # Note: we used to localize $0 but that turns out to trigger a bug
    # in perl 5.6.1.
-   my $z = $ARGV[0] || '';
+   my $z = (($ARGV[0] eq 'help') ? $ARGV[1] : $ARGV[0]) || '';
    $comment	= "$z [-new] [-element] object-selector ...";
    $diffcs	= "$z view-tag-1 [view-tag-2]";
    $eclipse	= "$z element ...";
    $edattr	= "$z [-view [-tag view-tag]] | [-element] object-selector ...";
    $grep	= "$z [grep-flags] pattern element";
-   $protectview	= "$z [-force] [-replace]
-                    [-chown login-name] [-chgrp group-name] [-chmod permissions]
-                    [-add_group group-name[,...]]
-                    [-delete_group group-name[,...]]
-		    {-tag view-tag | view-storage-dir-pname ...}";
+   $protectview	= "$z [-force] [-replace]"
+		.  "\n[-chown login-name] [-chgrp group-name] [-chmod permissions]"
+		.  "\n[-add_group group-name[,...]]"
+		.  "\n[-delete_group group-name[,...]]"
+		.  "\n{-tag view-tag | view-storage-dir-pname ...}";
    $recheckout	= "$z [-keep|-rm] pname ...";
-   $winkout	= "$z [-dir|-rec|-all] [-f file] [-pro/mote] [-do]
-		[-meta file [-print] file ...";
+   $winkout	= "$z [-dir|-rec|-all] [-f file] [-pro/mote] [-do]"
+		.  "\n[-meta file [-print] file ...";
    $workon	= "$z [-me] [-login] [-exec command-invocation] view-tag";
 }
 
@@ -58,32 +58,6 @@ use strict;
 1;
 
 __END__
-
-## Internal service routines, undocumented.
-# Function to parse 'include' stmts recursively.  Used by
-# config-spec parsing meta-commands. The first arg is a
-# "magic incrementing string", the second a filename,
-# the third an "action" which is eval-ed
-# for each line.  It can be as simple as 'print' or as
-# complex a regular expression as desired. If the action is
-# null, only the names of traversed files are printed.
-sub _Burrow {
-    local $input = shift;
-    my($filename, $action) = @_;
-    print $filename, "\n" if !$action;
-    $input++;
-    if (!open($input, $filename)) {
-	warn "$filename: $!";
-	return;
-    }
-    while (<$input>) {
-	if (/^include\s+(.*)/) {
-	    _Burrow($input, $1, $action);
-	    next;
-	}
-	eval $action if $action;
-    }
-}
 
 =head1 NAME
 
@@ -177,7 +151,7 @@ sub catcs {
 	my $tag = ViewTag(@ARGV);
 	die Msg('E', "view tag cannot be determined") if !$tag;;
 	my($vws) = reverse split '\s+', ClearCase::Argv->lsview($tag)->qx;
-	exit _Burrow('CATCS_00', "$vws/config_spec", $op);
+	exit Burrow('CATCS_00', "$vws/config_spec", $op);
     }
 }
 
@@ -925,7 +899,8 @@ sub recheckout {
 	unlink $keep;
 	if (rename($_, $keep)) {
 	    if (File::Copy::copy($pred, $_)) {
-		chmod 0644, $_;
+		my $mode = (stat $keep)[2];
+		chmod $mode, $_;
 	    } else {
 		die Msg('E', (-r $_ ? $keep : $_) . ": $!");
 	    }
@@ -1122,7 +1097,8 @@ sub setview {
 
 Adds a B<-quiet> option to strip out all those annoying
 C<Processing dir ...> and C<End dir ...> messages so you can see what
-files actually changed.
+files actually changed. It also suppresses logging by redirecting the
+log file to /dev/null.
 
 =cut
 
@@ -1130,11 +1106,15 @@ sub update {
     my %opt;
     GetOptions(\%opt, qw(quiet));
     return 0 if !$opt{quiet};
+    if (!grep m%^-log%, @ARGV) {
+	splice(@ARGV, 1, 0, '-log', MSWIN ? 'NUL' : '/dev/null');
+    }
     my $ct = ClearCase::Argv->find_cleartool;
     open(CMD, "$ct @ARGV |") || exit(2);
     while(<CMD>) {
 	next if m%^(?:Processing|End)\s%;
 	next if m%^[.]+$%;
+	next if m%, copied 0 %;
 	print;
     }
     exit(close(CMD));

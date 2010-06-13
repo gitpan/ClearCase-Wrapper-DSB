@@ -53,3 +53,13 @@ Revision history for Perl extension ClearCase::Wrapper::DSB.
 	  renamed the ->cleartool method to ->find_cleartool;
 	  this module forgot to track that change till now.
 	  This caused "ct setcs -clone <view-tag>" to fail.
+
+1.13 Wed Mar 29 11:42:37 EST 2006
+	- Fixed a minor warning in "ct lock".
+
+1.14 Thu May 13 17:09:45 EDT 2010
+	- Fixed a file-mode bug in "ct reco/recheckout".
+	- Pushed recursion support up into ClearCase::Wrapper for
+	  use by other overlay modules.
+	- Tweaked indenting in show usage functions
+
